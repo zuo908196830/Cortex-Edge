@@ -1,4 +1,4 @@
-package api
+package mqtt
 
 import (
 	"bytes"
@@ -8,20 +8,24 @@ import (
 	"strings"
 	"time"
 
-	"edge-gateway/api/model"
-	"edge-gateway/gateway"
+	"edge-gateway/internal/adapter/llm"
+	"edge-gateway/internal/adapter/registry"
+	"edge-gateway/internal/adapter/speech"
+	"edge-gateway/internal/adapter/transport"
+	mqttmsg "edge-gateway/internal/api/mqtt/message"
+	app "edge-gateway/internal/service/gateway"
 
-	"github.com/pascaldekloe/mqtt"
+	mqttlib "github.com/pascaldekloe/mqtt"
 )
 
 type Server struct {
-	gateway *gateway.Gateway
-	client  *mqtt.Client
+	gateway *app.Service
+	client  *mqttlib.Client
 }
 
 func NewServer() *Server {
-	client, err := mqtt.VolatileSession("demo-client", &mqtt.Config{
-		Dialer:       mqtt.NewDialer("tcp", "mq1.example.com:1883"),
+	client, err := mqttlib.VolatileSession("demo-client", &mqttlib.Config{
+		Dialer:       mqttlib.NewDialer("tcp", "mq1.example.com:1883"),
 		PauseTimeout: 4 * time.Second,
 		CleanSession: true,
 	})
@@ -29,10 +33,23 @@ func NewServer() *Server {
 		panic(err)
 	}
 
+	return NewServerWithClient(defaultGatewayService(), client)
+}
+
+func NewServerWithClient(gateway *app.Service, client *mqttlib.Client) *Server {
 	return &Server{
-		gateway: gateway.New(),
+		gateway: gateway,
 		client:  client,
 	}
+}
+
+func defaultGatewayService() *app.Service {
+	return app.NewService(
+		registry.NewMemoryRepository(),
+		speech.NewRecognizer(),
+		llm.NewPlanner(),
+		transport.NewInvoker(),
+	)
 }
 
 func (s *Server) SubscribeMqtt() {
@@ -48,7 +65,7 @@ func (s *Server) SubscribeMqtt() {
 		panic(err)
 	}
 
-	go func(client *mqtt.Client) {
+	go func(client *mqttlib.Client) {
 		for {
 			message, topic, err := client.ReadSlices()
 			if err != nil {
@@ -84,12 +101,14 @@ func (s *Server) dispatchMqttMessage(topic, message []byte) {
 }
 
 func (s *Server) handleRegistMessage(message []byte) {
-	var registMessage model.RegistMessage
+	var registMessage mqttmsg.RegistMessage
 	if err := json.NewDecoder(bytes.NewReader(message)).Decode(&registMessage); err != nil {
 		log.Println("decode regist message error:", err)
 		return
 	}
-	s.gateway.RegisterDevice(context.Background(), registMessage.Device)
+	if err := s.gateway.RegisterDevice(context.Background(), registMessage.Device); err != nil {
+		log.Println("register device error:", err)
+	}
 }
 
 func (s *Server) handleHeartbeatMessage(message []byte) {

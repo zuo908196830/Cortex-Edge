@@ -2,24 +2,21 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
-	"edge-gateway/device"
+	"edge-gateway/internal/model/device"
+	app "edge-gateway/internal/service/gateway"
 )
 
-// CommandRequest 是发给 LLM 的设备指令生成请求。
-type CommandRequest struct {
-	Utterance string          `json:"utterance"`
-	Devices   []device.Device `json:"devices"`
+type Planner struct{}
+
+func NewPlanner() *Planner {
+	return &Planner{}
 }
 
-// CommandPlanner 负责根据用户文本和设备能力生成设备指令。
-type CommandPlanner interface {
-	BuildCommands(ctx context.Context, request CommandRequest) ([]device.Command, error)
-}
-
-func NewCommandPlanner() CommandPlanner {
-	return nil
+func (Planner) BuildCommands(context.Context, app.CommandRequest) ([]device.Command, error) {
+	return nil, fmt.Errorf("llm command planner is not configured")
 }
 
 // CapabilityPrompt 返回设备操作能力的紧凑文本描述。

@@ -49,7 +49,7 @@ type Device struct {
 	Description  string         `json:"description,omitempty"`
 	SwVersion    string         `json:"sw_version,omitempty"`
 	PowerOnState string         `json:"power_on_state,omitempty"`
-	CurrentState map[string]any `json:"current_state,omitempty"` // 当前状态，key 为状态名，value 为状态值，具体类型需要根据 Type 判断
+	CurrentState map[string]any `json:"current_state,omitempty"`
 	Capabilities []Capability   `json:"capabilities"`
 }
 
@@ -172,15 +172,6 @@ func validateValueType(param ParameterSpec, value any) error {
 		return fmt.Errorf("unsupported type %q", param.Type)
 	}
 	return fmt.Errorf("expected %s, got %T", param.Type, value)
-}
-
-func isNumber(value any) bool {
-	switch value.(type) {
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
-		return true
-	default:
-		return false
-	}
 }
 
 func isInteger(value any) bool {
