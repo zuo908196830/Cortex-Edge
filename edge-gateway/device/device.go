@@ -20,24 +20,22 @@ const (
 type ValueType string
 
 const (
-	ValueString  ValueType = "string"
-	ValueInteger ValueType = "integer"
-	ValueNumber  ValueType = "number"
-	ValueBool    ValueType = "bool"
-	ValueObject  ValueType = "object"
-	ValueArray   ValueType = "array"
+	ValueString ValueType = "string"
+	ValueInt    ValueType = "int"
+	ValueBool   ValueType = "bool"
+	ValueObject ValueType = "object"
+	ValueArray  ValueType = "array"
 )
 
 // ParameterSpec 描述设备操作支持的单个参数。
 type ParameterSpec struct {
 	Name        string    `json:"name"`
 	Type        ValueType `json:"type"`
-	Required    bool      `json:"required"`
 	Description string    `json:"description,omitempty"`
 }
 
-// OperationSpec 描述设备暴露给网关的一个操作。
-type OperationSpec struct {
+// Capability 描述设备暴露给网关的一个操作。
+type Capability struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  []ParameterSpec `json:"parameters,omitempty"`
@@ -45,20 +43,14 @@ type OperationSpec struct {
 
 // Device 是网关内部统一使用的设备实体。
 type Device struct {
-	ID          ID              `json:"id"`
-	Name        string          `json:"name"`
-	Protocol    Protocol        `json:"protocol,omitempty"`
-	Endpoint    string          `json:"endpoint,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Operations  []OperationSpec `json:"operations"`
-}
-
-// Normalize 填充设备实体中的默认值，减少 C 端注册时必须提供的字段。
-func (d Device) Normalize() Device {
-	if d.Protocol == "" {
-		d.Protocol = ProtocolHTTPJSON
-	}
-	return d
+	ID           ID             `json:"id"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	Description  string         `json:"description,omitempty"`
+	SwVersion    string         `json:"sw_version,omitempty"`
+	PowerOnState string         `json:"power_on_state,omitempty"`
+	CurrentState map[string]any `json:"current_state,omitempty"` // 当前状态，key 为状态名，value 为状态值，具体类型需要根据 Type 判断
+	Capabilities []Capability   `json:"capabilities"`
 }
 
 // Command 是 LLM 产出的标准化设备调用指令。
@@ -88,42 +80,35 @@ type Result struct {
 	Output    any    `json:"output,omitempty"`
 }
 
-func (d Device) Operation(name string) (OperationSpec, bool) {
-	for _, op := range d.Operations {
-		if op.Name == name {
-			return op, true
+func (d Device) Capability(name string) (Capability, bool) {
+	for _, capability := range d.Capabilities {
+		if capability.Name == name {
+			return capability, true
 		}
 	}
-	return OperationSpec{}, false
+	return Capability{}, false
 }
 
 func (d Device) ValidateForRegister() error {
-	d = d.Normalize()
 	if d.ID == "" {
 		return fmt.Errorf("device id is required")
 	}
 	if d.Name == "" {
 		return fmt.Errorf("device name is required")
 	}
-	if d.Protocol != ProtocolHTTPJSON {
-		return fmt.Errorf("device %q protocol %q is not supported", d.ID, d.Protocol)
-	}
-	if d.Endpoint == "" {
-		return fmt.Errorf("device %q endpoint is required", d.ID)
-	}
-	if len(d.Operations) == 0 {
-		return fmt.Errorf("device %q must expose at least one operation", d.ID)
+	if len(d.Capabilities) == 0 {
+		return fmt.Errorf("device %q must expose at least one capability", d.ID)
 	}
 
-	seen := make(map[string]struct{}, len(d.Operations))
-	for _, op := range d.Operations {
-		if op.Name == "" {
-			return fmt.Errorf("device %q has an operation without name", d.ID)
+	seen := make(map[string]struct{}, len(d.Capabilities))
+	for _, capability := range d.Capabilities {
+		if capability.Name == "" {
+			return fmt.Errorf("device %q has a capability without name", d.ID)
 		}
-		if _, ok := seen[op.Name]; ok {
-			return fmt.Errorf("device %q has duplicate operation %q", d.ID, op.Name)
+		if _, ok := seen[capability.Name]; ok {
+			return fmt.Errorf("device %q has duplicate capability %q", d.ID, capability.Name)
 		}
-		seen[op.Name] = struct{}{}
+		seen[capability.Name] = struct{}{}
 	}
 	return nil
 }
@@ -133,21 +118,18 @@ func (d Device) ValidateCommand(cmd Command) error {
 		return fmt.Errorf("command device %q does not match device %q", cmd.DeviceID, d.ID)
 	}
 
-	op, ok := d.Operation(cmd.Operation)
+	capability, ok := d.Capability(cmd.Operation)
 	if !ok {
-		return fmt.Errorf("device %q does not support operation %q", d.ID, cmd.Operation)
+		return fmt.Errorf("device %q does not support capability %q", d.ID, cmd.Operation)
 	}
 
-	for _, param := range op.Parameters {
+	for _, param := range capability.Parameters {
 		value, ok := cmd.Arguments[param.Name]
 		if !ok {
-			if param.Required {
-				return fmt.Errorf("operation %q requires parameter %q", op.Name, param.Name)
-			}
-			continue
+			return fmt.Errorf("capability %q requires parameter %q", capability.Name, param.Name)
 		}
 		if err := validateValueType(param, value); err != nil {
-			return fmt.Errorf("operation %q parameter %q: %w", op.Name, param.Name, err)
+			return fmt.Errorf("capability %q parameter %q: %w", capability.Name, param.Name, err)
 		}
 	}
 
@@ -170,12 +152,8 @@ func validateValueType(param ParameterSpec, value any) error {
 		if _, ok := value.(string); ok {
 			return nil
 		}
-	case ValueInteger:
+	case ValueInt:
 		if isInteger(value) {
-			return nil
-		}
-	case ValueNumber:
-		if isNumber(value) {
 			return nil
 		}
 	case ValueBool:

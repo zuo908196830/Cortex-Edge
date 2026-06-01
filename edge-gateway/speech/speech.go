@@ -21,3 +21,7 @@ type Transcript struct {
 type Recognizer interface {
 	Transcribe(ctx context.Context, audio Audio) (Transcript, error)
 }
+
+func NewRecognizer() Recognizer {
+	return nil
+}

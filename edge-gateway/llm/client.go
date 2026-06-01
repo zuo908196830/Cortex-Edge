@@ -18,6 +18,10 @@ type CommandPlanner interface {
 	BuildCommands(ctx context.Context, request CommandRequest) ([]device.Command, error)
 }
 
+func NewCommandPlanner() CommandPlanner {
+	return nil
+}
+
 // CapabilityPrompt 返回设备操作能力的紧凑文本描述。
 func CapabilityPrompt(devices []device.Device) string {
 	var builder strings.Builder
@@ -27,7 +31,7 @@ func CapabilityPrompt(devices []device.Device) string {
 		builder.WriteString(" name=")
 		builder.WriteString(d.Name)
 		builder.WriteString(" operations=")
-		for index, op := range d.Operations {
+		for index, op := range d.Capabilities {
 			if index > 0 {
 				builder.WriteString(",")
 			}

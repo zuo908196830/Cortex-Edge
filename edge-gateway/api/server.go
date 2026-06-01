@@ -1,110 +1,102 @@
 package api
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"net/http"
+	"log"
+	"strings"
+	"time"
 
-	"edge-gateway/device"
+	"edge-gateway/api/model"
 	"edge-gateway/gateway"
+
+	"github.com/pascaldekloe/mqtt"
 )
 
 type Server struct {
 	gateway *gateway.Gateway
+	client  *mqtt.Client
 }
 
-func NewServer(gateway *gateway.Gateway) *Server {
-	return &Server{gateway: gateway}
-}
-
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/devices", s.handleDevices)
-	mux.HandleFunc("/voice", s.handleVoice)
-	return mux
-}
-
-func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		s.listDevices(w, r.Context())
-	case http.MethodPost:
-		s.registerDevice(w, r)
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func (s *Server) listDevices(w http.ResponseWriter, ctx context.Context) {
-	devices, err := s.gateway.ListDevices(ctx)
+func NewServer() *Server {
+	client, err := mqtt.VolatileSession("demo-client", &mqtt.Config{
+		Dialer:       mqtt.NewDialer("tcp", "mq1.example.com:1883"),
+		PauseTimeout: 4 * time.Second,
+		CleanSession: true,
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		panic(err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
+
+	return &Server{
+		gateway: gateway.New(),
+		client:  client,
+	}
 }
 
-func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-
-	var dev device.Device
-	if err := json.NewDecoder(r.Body).Decode(&dev); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device payload")
-		return
-	}
-	if err := s.gateway.RegisterDevice(r.Context(), dev); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, dev)
-}
-
-func (s *Server) handleVoice(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	defer r.Body.Close()
-
-	var payload struct {
-		MIMEType    string `json:"mime_type"`
-		AudioBase64 string `json:"audio_base64"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid voice payload")
-		return
-	}
-	if payload.AudioBase64 == "" {
-		writeError(w, http.StatusBadRequest, "audio_base64 is required")
-		return
-	}
-
-	audio, err := base64.StdEncoding.DecodeString(payload.AudioBase64)
+func (s *Server) SubscribeMqtt() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := s.client.Subscribe(
+		ctx.Done(),
+		"edge/device/+/regist",
+		"edge/device/+/heartbeat",
+		"edge/device/+/command_ack",
+	)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "audio_base64 is invalid")
-		return
+		panic(err)
 	}
 
-	results, err := s.gateway.HandleVoice(r.Context(), audio, payload.MIMEType)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, context.Canceled) {
-			status = http.StatusRequestTimeout
+	go func(client *mqtt.Client) {
+		for {
+			message, topic, err := client.ReadSlices()
+			if err != nil {
+				wait := client.ReadBackoff(err)
+				if wait == nil {
+					return
+				}
+				<-wait
+				continue
+			}
+			s.dispatchMqttMessage(topic, message)
 		}
-		writeError(w, status, err.Error())
+	}(s.client)
+}
+
+func (s *Server) dispatchMqttMessage(topic, message []byte) {
+	parts := strings.Split(string(topic), "/")
+	if len(parts) != 4 || parts[0] != "edge" || parts[1] != "device" {
+		s.handleUnknownTopic(topic, message)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+
+	switch parts[3] {
+	case "regist":
+		s.handleRegistMessage(message)
+	case "heartbeat":
+		s.handleHeartbeatMessage(message)
+	case "command_ack":
+		s.handleCommandAckMessage(message)
+	default:
+		s.handleUnknownTopic(topic, message)
+	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+func (s *Server) handleRegistMessage(message []byte) {
+	var registMessage model.RegistMessage
+	if err := json.NewDecoder(bytes.NewReader(message)).Decode(&registMessage); err != nil {
+		log.Println("decode regist message error:", err)
+		return
+	}
+	s.gateway.RegisterDevice(context.Background(), registMessage.Device)
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+func (s *Server) handleHeartbeatMessage(message []byte) {
+}
+
+func (s *Server) handleCommandAckMessage(message []byte) {
+}
+
+func (s *Server) handleUnknownTopic(topic, message []byte) {
 }

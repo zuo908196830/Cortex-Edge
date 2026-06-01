@@ -19,12 +19,21 @@ type Gateway struct {
 	invoker  transport.Invoker
 }
 
-func New(registry registry.Registry, speech speech.Recognizer, planner llm.CommandPlanner, invoker transport.Invoker) *Gateway {
+func New() *Gateway {
+	registry := registry.NewMemoryRegistry()
+	speech := speech.NewRecognizer()
+	planner := llm.NewCommandPlanner()
+	invoker := transport.NewInvoker()
+
 	return &Gateway{registry: registry, speech: speech, planner: planner, invoker: invoker}
 }
 
 func (g *Gateway) RegisterDevice(ctx context.Context, device device.Device) error {
-	return g.registry.Register(ctx, device)
+	if err := g.registry.Regist(ctx, device); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (g *Gateway) ListDevices(ctx context.Context) ([]device.Device, error) {
