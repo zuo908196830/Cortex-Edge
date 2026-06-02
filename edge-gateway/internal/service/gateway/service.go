@@ -83,12 +83,12 @@ func (s *Service) executeCommands(ctx context.Context, commands []device.Command
 
 	results := make([]device.Result, 0, len(commands))
 	for _, command := range commands {
-		dev, ok := s.devices.Get(ctx, command.DeviceID)
-		if !ok {
-			return results, fmt.Errorf("device %q is not registered", command.DeviceID)
+		dev, err := s.devices.Get(ctx, command.DeviceID)
+		if err != nil {
+			return results, fmt.Errorf("device %q is not registered, error: %w", command.DeviceID, err)
 		}
 		if err := dev.ValidateCommand(command); err != nil {
-			return results, err
+			return results, fmt.Errorf("validate command: %w", err)
 		}
 
 		result, err := s.invoker.Invoke(ctx, dev, command)

@@ -16,7 +16,7 @@ type CommandRequest struct {
 // DeviceRepository 是网关应用服务访问设备集合的端口。
 type DeviceRepository interface {
 	Register(ctx context.Context, dev device.Device) error
-	Get(ctx context.Context, id device.ID) (device.Device, bool)
+	Get(ctx context.Context, id device.ID) (device.Device, error)
 	List(ctx context.Context) ([]device.Device, error)
 }
 

@@ -1,0 +1,30 @@
+# OS/editor noise
+.DS_Store
+*.swp
+*.swo
+
+# Logs and temp files
+*.log
+*.tmp
+tmp/
+
+# Go build/test artifacts
+bin/
+build/
+dist/
+*.out
+*.test
+*.prof
+coverage.out
+**/.gocache/
+
+# Local SQLite data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+**/db/
+
+# Local module binaries produced by `go build`
+/edge-gateway/edge-gateway
+/mqtt-server/mqtt-server
