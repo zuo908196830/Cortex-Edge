@@ -2,6 +2,7 @@
 .DS_Store
 *.swp
 *.swo
+*.vscode/
 
 # Logs and temp files
 *.log
