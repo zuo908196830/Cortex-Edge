@@ -2,23 +2,24 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"edge-gateway/internal/model/device"
-	"edge-gateway/internal/model/voice"
 )
 
 // Service 编排注册、语音识别、意图解析和设备调用等用例。
 type Service struct {
 	devices DeviceRepository
-	speech  SpeechRecognizer
 	planner CommandPlanner
 	invoker CommandInvoker
 }
 
-func NewService(devices DeviceRepository, speech SpeechRecognizer, planner CommandPlanner, invoker CommandInvoker) *Service {
-	return &Service{devices: devices, speech: speech, planner: planner, invoker: invoker}
+func NewService(devices DeviceRepository, planner CommandPlanner, invoker CommandInvoker) *Service {
+	return &Service{devices: devices, planner: planner, invoker: invoker}
 }
 
 func (s *Service) RegisterDevice(ctx context.Context, dev device.Device) error {
@@ -27,25 +28,6 @@ func (s *Service) RegisterDevice(ctx context.Context, dev device.Device) error {
 
 func (s *Service) ListDevices(ctx context.Context) ([]device.Device, error) {
 	return s.devices.List(ctx)
-}
-
-func (s *Service) HandleVoice(ctx context.Context, audio []byte, mimeType string) ([]device.Result, error) {
-	if len(audio) == 0 {
-		return nil, fmt.Errorf("audio is required")
-	}
-	if s.speech == nil {
-		return nil, fmt.Errorf("speech recognizer is not configured")
-	}
-
-	transcript, err := s.speech.Transcribe(ctx, voice.Audio{
-		Data:     audio,
-		MIMEType: mimeType,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("transcribe voice: %w", err)
-	}
-
-	return s.HandleText(ctx, transcript.Text)
 }
 
 func (s *Service) HandleText(ctx context.Context, utterance string) ([]device.Result, error) {
@@ -80,23 +62,84 @@ func (s *Service) executeCommands(ctx context.Context, commands []device.Command
 	if s.invoker == nil {
 		return nil, fmt.Errorf("device command invoker is not configured")
 	}
-
-	results := make([]device.Result, 0, len(commands))
-	for _, command := range commands {
-		dev, err := s.devices.Get(ctx, command.DeviceID)
-		if err != nil {
-			return results, fmt.Errorf("device %q is not registered, error: %w", command.DeviceID, err)
-		}
-		if err := dev.ValidateCommand(command); err != nil {
-			return results, fmt.Errorf("validate command: %w", err)
-		}
-
-		result, err := s.invoker.Invoke(ctx, dev, command)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
+	if len(commands) == 0 {
+		return nil, nil
 	}
 
-	return results, nil
+	// 1. 按 DeviceID 归类指令
+	commandMap := make(map[device.ID][]device.Command)
+	for _, command := range commands {
+		commandMap[command.DeviceID] = append(commandMap[command.DeviceID], command)
+	}
+
+	var (
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+		resultsMap = make(map[device.ID][]device.Result, len(commandMap))
+		errs       []error
+	)
+
+	// 2. 并发执行各个设备的指令
+	for devID, devCmds := range commandMap {
+		wg.Add(1)
+		go func(deviceID device.ID, commands []device.Command) {
+			defer wg.Done()
+
+			dev, err := s.devices.Get(ctx, deviceID)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("get device %s: %w", deviceID, err))
+				mu.Unlock()
+				return
+			}
+
+			for _, command := range commands {
+				if err := dev.ValidateCommand(command); err != nil {
+					mu.Lock()
+					errs = append(errs, fmt.Errorf("validate command for device %s: %w", deviceID, err))
+					mu.Unlock()
+					return
+				}
+			}
+
+			if err := s.invoker.Invoke(ctx, dev, commands, 5*time.Second); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("invoke commands for device %s: %w", deviceID, err))
+				mu.Unlock()
+				return
+			}
+
+			resList, err := s.invoker.Confirm(ctx, dev, commands, 10*time.Second)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("confirm commands for device %s: %w", deviceID, err))
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			resultsMap[deviceID] = resList
+			mu.Unlock()
+		}(devID, devCmds)
+	}
+
+	wg.Wait()
+
+	// 3. 检查是否有执行/校验失败
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	// 4. 汇总执行结果
+	var allResults []device.Result
+	for deviceID, resList := range resultsMap {
+		for _, result := range resList {
+			if !result.Success {
+				return nil, fmt.Errorf("command execution failed for device %q", deviceID)
+			}
+			allResults = append(allResults, result)
+		}
+	}
+
+	return allResults, nil
 }

@@ -29,7 +29,8 @@ type Planner struct {
 // NewPlanner 基于环境变量创建默认的 LLM 指令规划器。
 func NewPlanner() *Planner {
 	return &Planner{
-		apiKey:  firstEnv("LLM_API_KEY", "BIGMODEL_API_KEY", "ZHIPUAI_API_KEY"),
+		// apiKey:  firstEnv("LLM_API_KEY", "BIGMODEL_API_KEY", "ZHIPUAI_API_KEY"),
+		apiKey:  "34ae406f466d4c8c836b81124e08746f.eeRQC4jo7971izgQ",
 		baseURL: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
 		model:   "glm-4.5-air",
 		httpClient: &http.Client{

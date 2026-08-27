@@ -7,3 +7,9 @@ type RegistMessage struct {
 	MsgType   string        `json:"msg_type"`
 	Device    device.Device `json:"device"`
 }
+
+type TextMessage struct {
+	LocationID      string `json:"location_id"`
+	PermissionLevel int    `json:"permission_level"`
+	Text            string `json:"text"`
+}

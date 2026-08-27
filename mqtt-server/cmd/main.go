@@ -16,7 +16,17 @@ func main() {
 	server := mqtt.New(nil)
 
 	// ✅ 必须添加这一行！允许所有连接（开发环境用）
-	_ = server.AddHook(new(auth.AllowHook), nil)
+	_ = server.AddHook(new(auth.Hook), &auth.Options{
+		Ledger: &auth.Ledger{
+			Auth: auth.AuthRules{
+				{
+					Username: "esp32_admin", // ESP32 代码中填写的用户名
+					Password: "12345678",    // ESP32 代码中填写的密码
+					Allow:    true,
+				},
+			},
+		},
+	})
 
 	// 启动 TCP 监听器
 	tcp := listeners.NewTCP(listeners.Config{

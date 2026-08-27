@@ -62,9 +62,19 @@ type Command struct {
 
 // InvokeRequest 是网关发送给设备端的最小调用负载，方便 C 端解析。
 type InvokeRequest struct {
+	MessageID string         `json:"message_id,omitempty"`
 	DeviceID  ID             `json:"device_id,omitempty"`
 	Operation string         `json:"operation"`
 	Arguments map[string]any `json:"arguments,omitempty"`
+}
+
+// CommandAckMessage 是设备端给网关发回的指令执行 ACK 响应。
+type CommandAckMessage struct {
+	MessageID string `json:"message_id"`
+	DeviceID  ID     `json:"device_id,omitempty"`
+	Success   bool   `json:"success"`
+	Output    any    `json:"output,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // InvokeResponse 是设备端返回给网关的推荐响应格式。
@@ -76,6 +86,7 @@ type InvokeResponse struct {
 // Result 是网关执行设备指令后返回的结果。
 type Result struct {
 	DeviceID  ID     `json:"device_id"`
+	Success   bool   `json:"success"`
 	Operation string `json:"operation"`
 	Output    any    `json:"output,omitempty"`
 }
@@ -138,6 +149,15 @@ func (d Device) ValidateCommand(cmd Command) error {
 
 func (d Device) NewInvokeRequest(cmd Command) InvokeRequest {
 	return InvokeRequest{
+		DeviceID:  d.ID,
+		Operation: cmd.Operation,
+		Arguments: cmd.Arguments,
+	}
+}
+
+func (d Device) NewInvokeRequestWithID(cmd Command, messageID string) InvokeRequest {
+	return InvokeRequest{
+		MessageID: messageID,
 		DeviceID:  d.ID,
 		Operation: cmd.Operation,
 		Arguments: cmd.Arguments,

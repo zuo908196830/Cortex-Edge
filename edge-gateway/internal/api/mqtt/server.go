@@ -10,45 +10,56 @@ import (
 	"time"
 
 	"edge-gateway/internal/adapter/llm"
+	mqttadapter "edge-gateway/internal/adapter/mqtt"
 	"edge-gateway/internal/adapter/registry"
-	"edge-gateway/internal/adapter/speech"
 	"edge-gateway/internal/adapter/transport"
 	"edge-gateway/internal/api/mqtt/ack"
 	mqttmsg "edge-gateway/internal/api/mqtt/message"
+	"edge-gateway/internal/model/device"
 	app "edge-gateway/internal/service/gateway"
-
-	mqttlib "github.com/pascaldekloe/mqtt"
 )
 
 type Server struct {
-	gateway *app.Service
-	client  *mqttlib.Client
+	gateway    *app.Service
+	mqttClient *mqttadapter.Mqtt
+	invoker    *transport.Invoker
 }
 
 func NewServer() *Server {
-	client, err := mqttlib.VolatileSession("edge-gateway", &mqttlib.Config{
-		Dialer:       mqttlib.NewDialer("tcp", "127.0.0.1:1883"),
-		PauseTimeout: 4 * time.Second,
-		CleanSession: true,
-	})
+	mqttAdapter, err := mqttadapter.NewMqtt()
 	if err != nil {
 		panic(err)
 	}
 
-	return NewServerWithClient(defaultGatewayService(), client)
+	invoker := transport.NewInvokerWithMqtt(mqttAdapter)
+	gateway := app.NewService(
+		registry.NewRepository(),
+		llm.NewPlanner(),
+		invoker,
+	)
+
+	return &Server{
+		gateway:    gateway,
+		mqttClient: mqttAdapter,
+		invoker:    invoker,
+	}
 }
 
-func NewServerWithClient(gateway *app.Service, client *mqttlib.Client) *Server {
+func NewServerWithAdapter(gateway *app.Service, mqttAdapter *mqttadapter.Mqtt) *Server {
 	return &Server{
-		gateway: gateway,
-		client:  client,
+		gateway:    gateway,
+		mqttClient: mqttAdapter,
+		invoker:    transport.NewInvokerWithMqtt(mqttAdapter),
 	}
+}
+
+func NewServerWithClient(gateway *app.Service, mqttAdapter *mqttadapter.Mqtt) *Server {
+	return NewServerWithAdapter(gateway, mqttAdapter)
 }
 
 func defaultGatewayService() *app.Service {
 	return app.NewService(
 		registry.NewRepository(),
-		speech.NewRecognizer(),
 		llm.NewPlanner(),
 		transport.NewInvoker(),
 	)
@@ -60,16 +71,18 @@ func (s *Server) SubscribeMqtt() {
 
 	s.startReadLoop()
 	select {
-	case <-s.client.Online():
+	case <-s.mqttClient.Online():
 	case <-ctx.Done():
 		panic(fmt.Errorf("connect mqtt broker: %w", ctx.Err()))
 	}
 
-	err := s.client.Subscribe(
-		ctx.Done(),
+	err := s.mqttClient.Subscribe(
+		ctx,
+		0,
 		"edge/device/+/regist",
 		"edge/device/+/heartbeat",
 		"edge/device/+/command_ack",
+		"edge/device/+/message",
 	)
 	if err != nil {
 		panic(err)
@@ -78,7 +91,7 @@ func (s *Server) SubscribeMqtt() {
 }
 
 func (s *Server) startReadLoop() {
-	go func(client *mqttlib.Client) {
+	go func(client *mqttadapter.Mqtt) {
 		for {
 			message, topic, err := client.ReadSlices()
 			if err != nil {
@@ -91,7 +104,7 @@ func (s *Server) startReadLoop() {
 			}
 			s.dispatchMqttMessage(topic, message)
 		}
-	}(s.client)
+	}(s.mqttClient)
 }
 
 func (s *Server) dispatchMqttMessage(topic, message []byte) {
@@ -110,6 +123,8 @@ func (s *Server) dispatchMqttMessage(topic, message []byte) {
 		s.handleHeartbeatMessage(deviceID, message)
 	case "command_ack":
 		s.handleCommandAckMessage(deviceID, message)
+	case "message":
+		s.handleMessageMessage(message)
 	default:
 		s.handleUnknownTopic(deviceID, topic, message)
 	}
@@ -126,16 +141,34 @@ func (s *Server) handleRegistMessage(deviceID string, message []byte) {
 		log.Println("register device error:", err)
 		ackMsg = ack.BuildRegisterAckMessage(registMessage.MessageID, false, err.Error())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	s.client.Publish(ctx.Done(), ackMsg, fmt.Sprintf("edge/device/%s/regist_ack", deviceID))
+	s.mqttClient.Publish(context.Background(), ackMsg, fmt.Sprintf("edge/device/%s/regist_ack", deviceID), 10*time.Second)
 }
 
 func (s *Server) handleHeartbeatMessage(deviceID string, message []byte) {
 }
 
 func (s *Server) handleCommandAckMessage(deviceID string, message []byte) {
+	var ackMsg device.CommandAckMessage
+	if err := json.NewDecoder(bytes.NewReader(message)).Decode(&ackMsg); err != nil {
+		log.Println("decode command ack message error:", err)
+		return
+	}
+	if ackMsg.DeviceID == "" {
+		ackMsg.DeviceID = device.ID(deviceID)
+	}
+	if s.invoker != nil {
+		s.invoker.HandleAck(ackMsg)
+	}
 }
 
 func (s *Server) handleUnknownTopic(deviceID string, topic, message []byte) {
+}
+
+func (s *Server) handleMessageMessage(message []byte) {
+	var text mqttmsg.TextMessage
+	if err := json.NewDecoder(bytes.NewReader(message)).Decode(&text); err != nil {
+		log.Println("decode text message error:", err)
+		return
+	}
+	s.gateway.HandleText(context.Background(), text.Text)
 }
