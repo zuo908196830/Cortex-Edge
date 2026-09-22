@@ -43,14 +43,24 @@ type Capability struct {
 
 // Device 是网关内部统一使用的设备实体。
 type Device struct {
-	ID           ID             `json:"id"`
-	Name         string         `json:"name"`
-	Type         string         `json:"type"`
-	Description  string         `json:"description,omitempty"`
-	SwVersion    string         `json:"sw_version,omitempty"`
-	PowerOnState string         `json:"power_on_state,omitempty"`
+	// ID 是设备在网关中的唯一标识符（例如: "dev_light_001"）。
+	ID ID `json:"id"`
+	// Name 是可读的设备名称，便于用户识别（例如: "客厅主灯"）。
+	Name string `json:"name"`
+	// Type 是设备类型/品类（例如: "light", "switch", "air_conditioner"）。
+	Type string `json:"type"`
+	// Description 是设备的详细描述信息（可选）。
+	Description string `json:"description,omitempty"`
+	// SwVersion 是设备的软件/固件版本号（例如: "v1.0.4"，可选）。
+	SwVersion string `json:"sw_version,omitempty"`
+	// PowerOnState 描述设备上电/复电后的默认初始状态（例如: "ON", "OFF", "LAST"，可选）。
+	PowerOnState string `json:"power_on_state,omitempty"`
+	// CurrentState 保存设备的当前运行状态键值对（例如: {"power": "on", "brightness": 80}）。
 	CurrentState map[string]any `json:"current_state,omitempty"`
-	Capabilities []Capability   `json:"capabilities"`
+	// Capabilities 定义设备支持的所有能力/可执行操作列表（例如: [TurnOn, SetBrightness]）。
+	Capabilities []Capability `json:"capabilities"`
+	// LocationID 标识设备所属的位置/房间 ID（例如: "loc_living_room"）。
+	LocationID ID `json:"location_id"`
 }
 
 // Command 是 LLM 产出的标准化设备调用指令。

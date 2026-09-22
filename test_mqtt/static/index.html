@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MQTT Web Studio - 实时消息收发控制台</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Header -->
+    <header class="top-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-network-wired"></i>
+        </div>
+        <div class="brand-text">
+          <h1>MQTT Web Studio</h1>
+          <span class="version-tag">v1.0 • Edge Studio</span>
+        </div>
+      </div>
+
+      <!-- Connection Status Badge -->
+      <div class="header-status">
+        <div id="statusIndicator" class="status-badge disconnected">
+          <span class="status-dot"></span>
+          <span id="statusText">未连接</span>
+        </div>
+        <div class="broker-info-chip" id="brokerInfoChip" style="display: none;">
+          <i class="fa-solid fa-server"></i>
+          <span id="activeBrokerAddress">tcp://127.0.0.1:1883</span>
+        </div>
+      </div>
+
+      <!-- Live Counters & Stats -->
+      <div class="header-stats">
+        <div class="stat-item" title="已接收消息数">
+          <i class="fa-solid fa-arrow-down-long stat-icon rx"></i>
+          <div class="stat-meta">
+            <span class="stat-label">接收 (Rx)</span>
+            <span id="statRxCount" class="stat-value">0</span>
+          </div>
+        </div>
+        <div class="stat-item" title="已发送消息数">
+          <i class="fa-solid fa-arrow-up-long stat-icon tx"></i>
+          <div class="stat-meta">
+            <span class="stat-label">发送 (Tx)</span>
+            <span id="statTxCount" class="stat-value">0</span>
+          </div>
+        </div>
+        <div class="stat-item" title="当前活动订阅数">
+          <i class="fa-solid fa-tags stat-icon sub"></i>
+          <div class="stat-meta">
+            <span class="stat-label">已订阅主题</span>
+            <span id="statSubCount" class="stat-value">0</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Grid Layout -->
+    <main class="main-content">
+      <!-- Left Sidebar (Connection & Subscription Config) -->
+      <aside class="sidebar">
+        <!-- Connection Settings Card -->
+        <section class="card config-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-plug"></i> MQTT Broker 连接</h2>
+            <button id="toggleConfigBtn" class="btn-xs-ghost"><i class="fa-solid fa-chevron-up"></i></button>
+          </div>
+          <div class="card-body" id="configCardBody">
+            <div class="form-grid">
+              <div class="form-group span-2">
+                <label>协议与 Host 地址</label>
+                <div class="input-with-select">
+                  <select id="protocolSelect">
+                    <option value="tcp">tcp://</option>
+                    <option value="ws">ws://</option>
+                    <option value="wss">wss://</option>
+                    <option value="ssl">ssl://</option>
+                  </select>
+                  <input type="text" id="brokerHost" value="127.0.0.1" placeholder="127.0.0.1 或 broker.emqx.io">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>端口 (Port)</label>
+                <input type="number" id="brokerPort" value="1883" placeholder="1883">
+              </div>
+
+              <div class="form-group">
+                <label>客户端 ID (Client ID)</label>
+                <div class="input-action">
+                  <input type="text" id="clientId" placeholder="mqtt_client_xxxx">
+                  <button id="genClientIdBtn" class="btn-inline" title="重新生成随机ID"><i class="fa-solid fa-arrows-rotate"></i></button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>用户名 (Username)</label>
+                <input type="text" id="username" placeholder="可选">
+              </div>
+
+              <div class="form-group">
+                <label>密码 (Password)</label>
+                <input type="password" id="password" placeholder="可选">
+              </div>
+
+              <div class="form-group span-2 flex-row align-center justify-between">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="cleanSession" checked>
+                  <span>Clean Session</span>
+                </label>
+                <div class="keepalive-wrapper">
+                  <span>KeepAlive:</span>
+                  <input type="number" id="keepAlive" value="60" style="width: 60px;"> 秒
+                </div>
+              </div>
+            </div>
+
+            <div class="action-bar">
+              <button id="connectBtn" class="btn btn-primary">
+                <i class="fa-solid fa-power-off"></i> 连接 Broker
+              </button>
+              <button id="disconnectBtn" class="btn btn-danger" style="display: none;">
+                <i class="fa-solid fa-circle-xmark"></i> 断开连接
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Subscription Card -->
+        <section class="card sub-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-rss"></i> 主题订阅管理</h2>
+          </div>
+          <div class="card-body">
+            <form id="subForm" class="sub-form">
+              <div class="sub-inputs">
+                <input type="text" id="subTopic" placeholder="订阅主题 (如: test/topic 或 sensor/#)" required>
+                <select id="subQos">
+                  <option value="0">QoS 0</option>
+                  <option value="1" selected>QoS 1</option>
+                  <option value="2">QoS 2</option>
+                </select>
+              </div>
+              <button type="submit" id="subBtn" class="btn btn-secondary btn-full">
+                <i class="fa-solid fa-plus"></i> 添加订阅
+              </button>
+            </form>
+
+            <!-- Subscribed Topics List -->
+            <div class="sub-list-container">
+              <div class="sub-list-header">
+                <span>已订阅列表</span>
+                <button id="clearSubsBtn" class="btn-xs-text" style="display: none;">全部取消</button>
+              </div>
+              <div id="subList" class="sub-list">
+                <div class="empty-sub-tip">暂无活动订阅，请输入主题并点击订阅</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Center / Right Panel (Messages Stream & Publisher) -->
+      <section class="workspace-area">
+        <!-- Message Feed Stream Log -->
+        <div class="card feed-card">
+          <div class="card-header">
+            <div class="header-title-group">
+              <h2><i class="fa-solid fa-list-ul"></i> 实时消息日志</h2>
+              <span id="logCountBadge" class="badge-count">0 条</span>
+            </div>
+
+            <!-- Filters and Actions -->
+            <div class="feed-controls">
+              <div class="search-box">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="searchInput" placeholder="搜索 Topic 或消息 Payload...">
+              </div>
+              <select id="directionFilter" class="select-sm">
+                <option value="all">全向 (Rx + Tx)</option>
+                <option value="rx">仅接收 (Rx)</option>
+                <option value="tx">仅发送 (Tx)</option>
+              </select>
+              <label class="checkbox-label auto-scroll-label">
+                <input type="checkbox" id="autoScrollCheck" checked>
+                <span>自动滚动</span>
+              </label>
+              <button id="clearLogsBtn" class="btn-sm-ghost" title="清空所有日志">
+                <i class="fa-solid fa-trash-can"></i> 清空
+              </button>
+            </div>
+          </div>
+
+          <div class="card-body feed-body" id="feedBody">
+            <div id="emptyFeedTip" class="empty-feed">
+              <div class="empty-icon"><i class="fa-solid fa-satellite-dish"></i></div>
+              <h3>等待 MQTT 消息接入...</h3>
+              <p>连接 Broker 并添加订阅主题，收发的消息将在这里实时串流显示。</p>
+            </div>
+            <div id="messageStream" class="message-stream"></div>
+          </div>
+        </div>
+
+        <!-- Publisher Area -->
+        <div class="card publisher-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-paper-plane"></i> 发布 MQTT 消息</h2>
+            <div class="pub-templates-dropdown">
+              <select id="templateSelect" class="select-sm">
+                <option value="" disabled selected>选择消息 Payload 快捷模板...</option>
+                <option value="text">纯文本消息 (Hello World)</option>
+                <option value="sensor">传感器数据 (JSON)</option>
+                <option value="status">设备状态事件 (JSON)</option>
+                <option value="control">控制指令 (JSON)</option>
+              </select>
+            </div>
+          </div>
+          <div class="card-body pub-body">
+            <div class="pub-meta-row">
+              <div class="form-group topic-group">
+                <label>目标 Topic</label>
+                <input type="text" id="pubTopic" placeholder="例如: test/topic" required value="test/topic">
+              </div>
+              <div class="form-group qos-group">
+                <label>QoS</label>
+                <select id="pubQos">
+                  <option value="0">QoS 0 (最多一次)</option>
+                  <option value="1" selected>QoS 1 (至少一次)</option>
+                  <option value="2">QoS 2 (恰好一次)</option>
+                </select>
+              </div>
+              <div class="form-group retain-group">
+                <label>Retain (保留)</label>
+                <label class="switch">
+                  <input type="checkbox" id="pubRetain">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="pub-payload-wrapper">
+              <div class="payload-header">
+                <span>Payload (消息内容)</span>
+                <div class="payload-actions">
+                  <button type="button" id="formatJsonBtn" class="btn-xs-text">
+                    <i class="fa-solid fa-code"></i> 格式化 JSON
+                  </button>
+                  <button type="button" id="clearPayloadBtn" class="btn-xs-text">
+                    <i class="fa-solid fa-xmark"></i> 清空
+                  </button>
+                </div>
+              </div>
+              <textarea id="pubPayload" rows="4" placeholder='输入发送内容，支持 String 或 JSON，例如 {"msg": "hello", "temp": 25.5}'></textarea>
+            </div>
+
+            <div class="pub-footer">
+              <div class="pub-history-info">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <span id="historyCountText">发送历史: 0 次</span>
+              </div>
+              <button id="publishBtn" class="btn btn-success btn-lg">
+                <i class="fa-solid fa-paper-plane"></i> 发送消息 (Publish)
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
