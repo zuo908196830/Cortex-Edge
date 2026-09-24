@@ -3,6 +3,8 @@
 *.swp
 *.swo
 *.vscode/
+.cache/
+**/.cache/
 
 # Logs and temp files
 *.log

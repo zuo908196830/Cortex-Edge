@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS 
+        "src/capability_mgr.c"
+        "src/command_router.c"
+        "src/net_wifi.c"
+        "src/net_mqtt.c"
+    INCLUDE_DIRS 
+        "include"
+    REQUIRES 
+        cjson
+        nvs_flash
+        esp_wifi
+        esp_event
+        mqtt
+        esp_netif
+        log
+)

@@ -61,6 +61,8 @@ venv/
 env/
 
 # Language Servers
+.cache/
+**/.cache/
 .clangd/
 .ccls-cache/
 compile_commands.json
